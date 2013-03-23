@@ -1,3 +1,5 @@
+package com.kennyaaronjava;
+
 import java.awt.*;
 import javax.swing.*;
 import java.io.*;
@@ -35,7 +37,7 @@ public class BeatBox {
 	int[] instruments={35,42,46,38,49,39,50,60,70,72,64,56,58,47,67,63};
 	
 	public static void main(String[] args){
-		new BeatBox().startUp(args[0]);//args[0] is the user name
+		new BeatBox().startUp("TheFlash");//args[0] is the user name
 	}
 	
 	public void startUp(String name){
