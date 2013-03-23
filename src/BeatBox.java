@@ -1,17 +1,32 @@
 import java.awt.*;
 import javax.swing.*;
+import java.io.*;
 import javax.sound.midi.*;
 import java.util.*;
 import java.awt.event.*;
-import java.io.*;
+import java.net.*;
+import javax.swing.event.*;
+
+
+//not sure why this isn't working!
 public class BeatBox {
-	
+	JFrame theFrame;
 	JPanel mainPanel;
+	JList incomingList;
+	JTextField userMessage;
 	ArrayList<JCheckBox> checkboxList;
+	int nextNum;
+	Vector<String> listVector = new Vector<String>();
+	String userName;
+	ObjectOutputStream out;
+	ObjectInputStream in;
+	HashMap<String, boolean[]> otherSeqsMap = new HashMap<String, boolean[]>();
+	
 	Sequencer sequencer;
 	Sequence sequence;
+	Sequence mySequence = null;
 	Track track;
-	JFrame theFrame;
+	
 	
 	String[] instrumentNames ={"Bass Drum", "Closed Hi-Hat","Open Hi-Hat","Acoustic Snare","Crash Cymbal",
 			"Hand Clap","High Tom","Hi Bongo","Maracas","Whistle","Low Conga","Cowbell","Vibraslap",
@@ -20,19 +35,35 @@ public class BeatBox {
 	int[] instruments={35,42,46,38,49,39,50,60,70,72,64,56,58,47,67,63};
 	
 	public static void main(String[] args){
-		new BeatBox().buildGUI();
+		new BeatBox().startUp(args[0]);//args[0] is the user name
+	}
+	
+	public void startUp(String name){
+		userName = name;
+		//open connection to the server
+		try {
+			Socket sock = new Socket("127.0.0.1",4242);
+			out = new ObjectOutputStream(sock.getOutputStream());
+			in = new ObjectInputStream(sock.getInputStream());
+			Thread remote = new Thread(new RemoteReader());
+			remote.start();
+		} catch(Exception ex){
+			System.out.println("Couldn't connect - you'll have to play alone");
+		}
+		setUpMidi();
+		buildGUI();
 	}
 	
 	public void buildGUI(){
 		theFrame = new JFrame("Cyber BeatBox");
-		theFrame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
 		BorderLayout layout = new BorderLayout();
 		JPanel background = new JPanel(layout);
 		background.setBorder(BorderFactory.createEmptyBorder(10,10,10,10));
 		
+		theFrame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
 		checkboxList = new ArrayList<JCheckBox>();
-		Box buttonBox = new Box(BoxLayout.Y_AXIS);
 		
+		Box buttonBox = new Box(BoxLayout.Y_AXIS);
 		JButton start = new JButton("Start");
 		start.addActionListener(new MyStarterListener());
 		buttonBox.add(start);
@@ -48,7 +79,7 @@ public class BeatBox {
 		JButton downTempo = new JButton("Tempo Down");
 		downTempo.addActionListener(new MyDownTempoListener());
 		buttonBox.add(downTempo);
-		
+		/*
 		JButton serializeIt = new JButton("Serialize it!");
 		serializeIt.addActionListener(new MySendListener());
 		buttonBox.add(serializeIt);
@@ -56,6 +87,21 @@ public class BeatBox {
 		JButton restoreIt = new JButton("Restore it!");
 		restoreIt.addActionListener(new MyReadInListener());
 		buttonBox.add(restoreIt);
+		*/
+		JButton sendIt = new JButton("Send it!");
+		sendIt.addActionListener(new MySendListener());
+		buttonBox.add(sendIt);
+		
+		userMessage = new JTextField();
+		buttonBox.add(userMessage);
+		
+		incomingList = new JList();
+		incomingList.addListSelectionListener(new MyListSelectionListener());
+		incomingList.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
+		JScrollPane theList = new JScrollPane(incomingList);
+		buttonBox.add(theList);
+		incomingList.setListData(listVector);//no data to start with
+		
 		
 		Box nameBox = new Box(BoxLayout.Y_AXIS);
 		for(int i =0;i<16;i++){
@@ -66,7 +112,6 @@ public class BeatBox {
 		background.add(BorderLayout.WEST, nameBox);
 		
 		theFrame.getContentPane().add(background);
-		
 		GridLayout grid = new GridLayout(16,16);
 		grid.setVgap(1);
 		grid.setHgap(2);
@@ -79,13 +124,17 @@ public class BeatBox {
 			checkboxList.add(c);
 			mainPanel.add(c);
 		}
-		
-		setUpMidi();
 		ImageIcon img = new ImageIcon("android-icon.jpg");
 		theFrame.setIconImage(img.getImage());
+		
+		
 		theFrame.setBounds(50,50,300,300);
 		theFrame.pack();
 		theFrame.setVisible(true);
+		
+		
+		
+		
 	}
 	public void setUpMidi(){
 		try{
@@ -97,27 +146,25 @@ public class BeatBox {
 		} catch (Exception e){e.printStackTrace();}
 	}//close method
 	public void buildTrackAndStart(){
-		int[] trackList = null;
-		
+		ArrayList<Integer> trackList = null;
 		sequence.deleteTrack(track);
 		track = sequence.createTrack();
 		
 		for(int i =0;i<16;i++){ //loop for each beat in a track
-			trackList = new int[16];
-			
-			int key = instruments[i];
+			trackList = new ArrayList<Integer>();
 			
 			for(int j=0;j<16;j++){
-				JCheckBox jc = checkboxList.get(j + 16*i);
+				JCheckBox jc = (JCheckBox) checkboxList.get(j + (16*i));
 				if(jc.isSelected()){
-					trackList[j] = key;
+					int key = instruments[i];
+					trackList.add(new Integer(key));
 				} else {
-					trackList[j]=0;
+					trackList.add(null);//because this slot should be empty in the track
 				}
 			}//close inner loop
 			
 			makeTracks(trackList);
-			track.add(makeEvent(176,1,127,0,16));//listener event
+		
 		}//close outer
 		track.add(makeEvent(192,9,1,0,15));
 		try {
@@ -163,6 +210,16 @@ public class BeatBox {
 					checkboxState[i]=true;
 				}
 			}//end of for loop
+			
+			String messageToSend = null;
+			try {
+				out.writeObject(userName + nextNum++ + ": "+userMessage.getText());
+				out.writeObject(checkboxState);
+			} catch (Exception ex){
+				System.out.println("Sorry dude. could not send the beat to the server");
+			}
+			userMessage.setText("");
+			/*
 			try {
 				JFileChooser fileSave = new JFileChooser();
 				fileSave.showSaveDialog(theFrame);
@@ -174,8 +231,25 @@ public class BeatBox {
 			} catch(Exception ex){
 				ex.printStackTrace();
 			}
+			*/
 		}//end of method
 	}//end of class
+	
+	public class MyListSelectionListener implements ListSelectionListener {
+		public void valueChanged(ListSelectionEvent le){
+			if(!le.getValueIsAdjusting()){
+				String selected = (String) incomingList.getSelectedValue();
+				if(selected != null){
+					//go to the map and change the sequence
+					boolean[] selectedState = (boolean[]) otherSeqsMap.get(selected);
+					changeSequence(selectedState);
+					sequencer.stop();
+					buildTrackAndStart();
+				}
+			}
+		}
+	}//end of class
+	/*
 	public class MyReadInListener implements ActionListener{
 		public void actionPerformed(ActionEvent a){
 			boolean[] checkboxState = null;
@@ -202,14 +276,52 @@ public class BeatBox {
 			buildTrackAndStart();
 		}//close method
 	}//close class
+	*/
+	public class RemoteReader implements Runnable {
+		boolean[] checkboxState = null;
+		String nameToShow = null;
+		Object obj = null;
+		public void run(){
+			try {
+				while((obj=in.readObject()) != null){
+					System.out.println("got an object from the server.");
+					System.out.println(obj.getClass());
+					String nameToShow = (String) obj;
+					checkboxState = (boolean[]) in.readObject();
+					otherSeqsMap.put(nameToShow,checkboxState);
+					listVector.add(nameToShow);
+					incomingList.setListData(listVector);
+				}//close while
+			} catch (Exception ex){ex.printStackTrace();}
+		}//close run
+	}//close inner class
 	
-	public void makeTracks(int[] list){
+	public class MyPlayMineListener implements ActionListener {
+		public void actionPerformed(ActionEvent a){
+			if(mySequence !=null){
+				sequence = mySequence;
+			}
+		}//close action performed
+	}//close inner class
+	public void changeSequence(boolean[] checkboxState){
+		for(int i=0; i<256;i++){
+			JCheckBox check = (JCheckBox) checkboxList.get(i);
+			if(checkboxState[i]){
+				check.setSelected(true);
+			} else {
+				check.setSelected(false);
+			}
+		}
+	}
+	public void makeTracks(ArrayList list){
+		Iterator it = list.iterator();
 		for(int i=0;i<16;i++){
-			int key = list[i];
-			if(key !=0){
+			Integer num = (Integer) it.next();
+			if(num !=null){
 				//NOTE ON & NOTE OFF events
-				track.add(makeEvent(144,9,key,100,i));
-				track.add(makeEvent(128,9,key,100,i+1));
+				int numKey = num.intValue();
+				track.add(makeEvent(144,9,numKey,100,i));
+				track.add(makeEvent(128,9,numKey,100,i+1));
 			}
 		}
 	}
@@ -223,3 +335,9 @@ public class BeatBox {
 		return event;
 	}
 }//close class
+
+/*
+Some comments here for the sake of a git test
+
+yet  more comments
+*/
